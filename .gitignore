@@ -1,0 +1,61 @@
+# Environment files
+.env
+.env.*
+!.env.example
+*.local
+
+# PostgreSQL data
+pgdata/
+postgres_data/
+*.dump
+*.sql.gz
+
+# Logs
+*.log
+logs/
+
+# Docker volumes
+volumes/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+*.sublime-project
+*.sublime-workspace
+
+# OS files
+Thumbs.db
+.DS_Store
+._*
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.bak
+*.backup
+
+# Build artifacts
+dist/
+build/
+*.tar.gz
+*.zip
+
+# Testing
+coverage/
+.nyc_output/
+*.test.log
+
+# Secrets
+secrets/
+*.key
+*.pem
+*.crt
+credentials.json
+
+# pgAdmin data
+pgadmin_data/
