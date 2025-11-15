@@ -4,7 +4,7 @@ A production-ready PostgreSQL 18 Docker image optimized for AI/ML workloads, fea
 
 [![Docker](https://img.shields.io/badge/docker-ghcr.io-blue)](https://github.com/Korrektly/postgres/pkgs/container/postgres)
 [![PostgreSQL](https://img.shields.io/badge/postgresql-18-blue)](https://www.postgresql.org/)
-[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![License](https://img.shields.io/badge/license-AGPLv3-green)](LICENSE)
 
 ## Features
 

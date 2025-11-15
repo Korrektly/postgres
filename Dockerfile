@@ -101,7 +101,7 @@ COPY --from=builder /usr/lib/postgresql/18/lib/*.so /usr/lib/postgresql/18/lib/
 RUN echo "shared_preload_libraries = 'timescaledb,vchord'" >> /usr/share/postgresql/postgresql.conf.sample
 
 # Copy initialization script and set permissions
-COPY --chmod=0755 docker/postgres/init-extensions.sh /docker-entrypoint-initdb.d/10-init-extensions.sh
+COPY --chmod=0755 docker/init-extensions.sh /docker-entrypoint-initdb.d/10-init-extensions.sh
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
