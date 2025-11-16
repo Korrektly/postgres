@@ -95,6 +95,7 @@ jobs:
           echo "Building for: $PLATFORM"
 
       - name: Build and push Docker image
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -117,7 +118,7 @@ jobs:
         if: github.event_name != 'pull_request'
         uses: aquasecurity/trivy-action@0.33.1
         with:
-          image-ref: ${{ env.REGISTRY }}/${{ github.repository }}:${{ steps.meta.outputs.version }}
+          image-ref: ${{ fromJSON(steps.meta.outputs.json).tags[0] }}
           format: "sarif"
           output: "trivy-results.sarif"
         continue-on-error: true
