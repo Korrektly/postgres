@@ -24,6 +24,23 @@ This specialized PostgreSQL image includes the following pre-installed extension
 - **Hybrid Search**: Combine vector similarity search with traditional full-text search
 - **Real-time Applications**: High-performance queries for latency-sensitive workloads
 
+## Versioning
+
+This project uses **CalVer** (Calendar Versioning) with the format: `<PostgreSQL_Version>-<Year>.<Month>.<Revision>`
+
+Example: `18.1-2025.01.0` represents PostgreSQL 18.1, first release in January 2025. Multiple releases in the same month increment the revision number (e.g., `18.1-2025.01.1`, `18.1-2025.01.2`).
+
+### Available Tags
+
+When a release is published (e.g., `18.1-2025.01.0`), the following tags are automatically created:
+
+- `ghcr.io/korrektly/postgres:18.1-2025.01.0` - Full version tag (pinned)
+- `ghcr.io/korrektly/postgres:18.1` - PostgreSQL major.minor version (updated with each release)
+- `ghcr.io/korrektly/postgres:18` - PostgreSQL major version (updated with each release)
+- `ghcr.io/korrektly/postgres:latest` - Latest stable release
+
+**Recommendation**: Use full version tags (`18.1-2025.01.0`) in production for reproducible builds. Use `18.1` or `18` tags for development to automatically receive updates within the same PostgreSQL version.
+
 ## Quick Start
 
 ### Using Docker
@@ -31,6 +48,9 @@ This specialized PostgreSQL image includes the following pre-installed extension
 ```bash
 # Pull the latest image
 docker pull ghcr.io/korrektly/postgres:latest
+
+# Or pin to a specific version
+docker pull ghcr.io/korrektly/postgres:18.1-2025.01.0
 
 # Run with default settings
 docker run -d \
