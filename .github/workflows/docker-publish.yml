@@ -117,7 +117,7 @@ jobs:
         if: github.event_name != 'pull_request'
         uses: aquasecurity/trivy-action@0.33.1
         with:
-          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.version }}
+          image-ref: ${{ env.REGISTRY }}/${{ github.repository }}:${{ steps.meta.outputs.version }}
           format: "sarif"
           output: "trivy-results.sarif"
         continue-on-error: true
