@@ -1,119 +1,6 @@
 # syntax=docker/dockerfile:1
-# Optimized multi-stage build for PostgreSQL with extensions
-# This Dockerfile uses BuildKit mount caches and optimized layer ordering for fast builds
+# PostgreSQL with pre-built extension packages for fast multi-arch builds
 
-################################################################################
-# Stage 1: Build stage - compile all extensions
-################################################################################
-FROM postgres:18.1-trixie AS builder
-
-# Build arguments for versions
-ARG PGVECTOR_VERSION=0.8.1
-ARG TIMESCALEDB_VERSION=2.23.1
-ARG VECTORCHORD_VERSION=1.0.0
-ARG VECTORCHORD_BM25_VERSION=0.2.2
-ARG PG_TOKENIZER_VERSION=0.1.1
-
-# Install ALL dependencies in a single layer for better caching
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    git \
-    cmake \
-    postgresql-server-dev-18 \
-    libssl-dev \
-    curl \
-    ca-certificates \
-    pkg-config \
-    libpq-dev \
-    clang \
-    && rm -rf /var/lib/apt/lists/*
-
-################################################################################
-# Install Rust toolchain (cached layer)
-################################################################################
-ENV RUSTUP_HOME=/usr/local/rustup \
-    CARGO_HOME=/usr/local/cargo \
-    PATH=/usr/local/cargo/bin:$PATH
-
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal
-
-################################################################################
-# Build pgvector (lightweight C extension, builds fast)
-################################################################################
-RUN cd /tmp && \
-    git clone --branch v${PGVECTOR_VERSION} --depth 1 https://github.com/pgvector/pgvector.git && \
-    cd pgvector && \
-    make clean && \
-    make OPTFLAGS="" && \
-    make install && \
-    cd / && \
-    rm -rf /tmp/pgvector
-
-################################################################################
-# Build TimescaleDB (CMake-based, moderate build time)
-################################################################################
-RUN cd /tmp && \
-    git clone --branch ${TIMESCALEDB_VERSION} --depth 1 https://github.com/timescale/timescaledb.git && \
-    cd timescaledb && \
-    ./bootstrap -DREGRESS_CHECKS=OFF -DPROJECT_INSTALL_METHOD="docker" -DCMAKE_BUILD_TYPE=Release && \
-    cd build && \
-    make -j$(nproc) && \
-    make install && \
-    cd / && \
-    rm -rf /tmp/timescaledb
-
-################################################################################
-# Install cargo-pgrx (one-time installation, heavily cached)
-################################################################################
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/usr/local/cargo/git \
-    cargo install cargo-pgrx --locked && \
-    cargo pgrx init --pg18 /usr/bin/pg_config
-
-################################################################################
-# Build VectorChord with mount caches
-# The mount caches persist cargo registry, git repos, and build artifacts
-# This provides similar benefits to cargo-chef but works with pgrx projects
-################################################################################
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/usr/local/cargo/git \
-    --mount=type=cache,target=/tmp/cargo-build-cache \
-    cd /tmp && \
-    git clone --branch ${VECTORCHORD_VERSION} --depth 1 https://github.com/tensorchord/VectorChord.git && \
-    cd VectorChord && \
-    CARGO_TARGET_DIR=/tmp/cargo-build-cache/vchord cargo pgrx install --pg-config /usr/bin/pg_config --release && \
-    cd / && \
-    rm -rf /tmp/VectorChord
-
-################################################################################
-# Build VectorChord-bm25 with mount caches
-################################################################################
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/usr/local/cargo/git \
-    --mount=type=cache,target=/tmp/cargo-build-cache \
-    cd /tmp && \
-    git clone --branch ${VECTORCHORD_BM25_VERSION} --depth 1 https://github.com/tensorchord/VectorChord-bm25.git && \
-    cd VectorChord-bm25 && \
-    CARGO_TARGET_DIR=/tmp/cargo-build-cache/vchord-bm25 cargo pgrx install --pg-config /usr/bin/pg_config --release && \
-    cd / && \
-    rm -rf /tmp/VectorChord-bm25
-
-################################################################################
-# Build pg_tokenizer with mount caches
-################################################################################
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/usr/local/cargo/git \
-    --mount=type=cache,target=/tmp/cargo-build-cache \
-    cd /tmp && \
-    git clone --branch ${PG_TOKENIZER_VERSION} --depth 1 https://github.com/tensorchord/pg_tokenizer.rs.git && \
-    cd pg_tokenizer.rs && \
-    CARGO_TARGET_DIR=/tmp/cargo-build-cache/pg_tokenizer cargo pgrx install --pg-config /usr/bin/pg_config --release && \
-    cd / && \
-    rm -rf /tmp/pg_tokenizer.rs
-
-################################################################################
-# Stage 2: Final runtime image (minimal, production-ready)
-################################################################################
 FROM postgres:18.1-trixie
 
 # Metadata labels (OCI spec)
@@ -139,14 +26,57 @@ LABEL org.korrektly.pgvector.version="${PGVECTOR_VERSION}" \
     org.korrektly.vectorchord-bm25.version="${VECTORCHORD_BM25_VERSION}" \
     org.korrektly.pg_tokenizer.version="${PG_TOKENIZER_VERSION}"
 
-# Copy only the compiled extensions from builder
-COPY --from=builder /usr/share/postgresql/18/extension/*.control /usr/share/postgresql/18/extension/
-COPY --from=builder /usr/share/postgresql/18/extension/*.sql /usr/share/postgresql/18/extension/
-COPY --from=builder /usr/lib/postgresql/18/lib/*.so /usr/lib/postgresql/18/lib/
+################################################################################
+# Install pre-built extension packages
+# Uses dpkg --print-architecture for multi-arch support (amd64/arm64)
+################################################################################
 
-# Configure PostgreSQL to preload TimescaleDB, VectorChord, and pg_tokenizer
-RUN echo "shared_preload_libraries = 'timescaledb,vchord,pg_tokenizer'" >> /usr/share/postgresql/postgresql.conf.sample && \
-    echo "search_path = '\"\$user\", public, tokenizer_catalog'" >> /usr/share/postgresql/postgresql.conf.sample
+# Install dependencies and add TimescaleDB repository
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        wget \
+        ca-certificates \
+        curl \
+        gnupg \
+    && mkdir -p /etc/apt/keyrings \
+    && curl -fsSL https://packagecloud.io/timescale/timescaledb/gpgkey \
+        | gpg --dearmor > /etc/apt/keyrings/timescale_timescaledb-archive-keyring.gpg \
+    && echo "deb [signed-by=/etc/apt/keyrings/timescale_timescaledb-archive-keyring.gpg] https://packagecloud.io/timescale/timescaledb/debian/ trixie main" \
+        > /etc/apt/sources.list.d/timescale_timescaledb.list \
+    && apt-get update
+
+# Download TensorChord extension packages from GitHub Releases
+RUN ARCH=$(dpkg --print-architecture) \
+    && wget -q -P /tmp \
+        https://github.com/tensorchord/VectorChord/releases/download/${VECTORCHORD_VERSION}/postgresql-18-vchord_${VECTORCHORD_VERSION}-1_${ARCH}.deb \
+        https://github.com/tensorchord/VectorChord-bm25/releases/download/${VECTORCHORD_BM25_VERSION}/postgresql-18-vchord-bm25_${VECTORCHORD_BM25_VERSION}-1_${ARCH}.deb \
+        https://github.com/tensorchord/pg_tokenizer.rs/releases/download/${PG_TOKENIZER_VERSION}/postgresql-18-pg-tokenizer_${PG_TOKENIZER_VERSION}-1_${ARCH}.deb
+
+# Install all extensions
+RUN ARCH=$(dpkg --print-architecture) \
+    && apt-get install -y --no-install-recommends \
+        postgresql-18-pgvector=${PGVECTOR_VERSION}-* \
+        timescaledb-2-postgresql-18=${TIMESCALEDB_VERSION}~debian13-1800 \
+        /tmp/postgresql-18-vchord_${VECTORCHORD_VERSION}-1_${ARCH}.deb \
+        /tmp/postgresql-18-pg-tokenizer_${PG_TOKENIZER_VERSION}-1_${ARCH}.deb \
+        /tmp/postgresql-18-vchord-bm25_${VECTORCHORD_BM25_VERSION}-1_${ARCH}.deb
+
+# Clean up to minimize image size
+RUN apt-get remove -y wget ca-certificates curl gnupg \
+    && apt-get purge -y --auto-remove \
+    && rm -rf \
+        /tmp/* \
+        /var/lib/apt/lists/* \
+        /etc/apt/sources.list.d/timescale_timescaledb.list \
+        /etc/apt/keyrings/timescale_timescaledb-archive-keyring.gpg
+
+################################################################################
+# Configure PostgreSQL to preload all extensions
+################################################################################
+RUN echo "shared_preload_libraries = 'timescaledb,vchord,vchord_bm25,vector,pg_tokenizer'" \
+        >> /usr/share/postgresql/postgresql.conf.sample \
+    && echo "search_path = '\"\$user\", public, bm25_catalog, tokenizer_catalog'" \
+        >> /usr/share/postgresql/postgresql.conf.sample
 
 # Copy initialization script and set permissions
 COPY --chmod=0755 docker/init-extensions.sh /docker-entrypoint-initdb.d/10-init-extensions.sh

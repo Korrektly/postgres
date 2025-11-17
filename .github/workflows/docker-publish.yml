@@ -104,15 +104,12 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          # Use GitHub Actions cache with max mode
+          # Use GitHub Actions cache with max mode for layer caching
           cache-from: type=gha
           cache-to: type=gha,mode=max
           # BuildKit inline cache for registry-based caching
           build-args: |
             BUILDKIT_INLINE_CACHE=1
-          # Use BuildKit's mount cache for Cargo
-          secrets: |
-            GIT_AUTH_TOKEN=${{ secrets.GITHUB_TOKEN }}
 
       - name: Run Trivy vulnerability scanner
         if: github.event_name != 'pull_request'
