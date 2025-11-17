@@ -12,6 +12,7 @@ ARG PGVECTOR_VERSION=0.8.1
 ARG TIMESCALEDB_VERSION=2.23.1
 ARG VECTORCHORD_VERSION=1.0.0
 ARG VECTORCHORD_BM25_VERSION=0.2.2
+ARG PG_TOKENIZER_VERSION=0.1.1
 
 # Install ALL dependencies in a single layer for better caching
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -98,6 +99,19 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     rm -rf /tmp/VectorChord-bm25
 
 ################################################################################
+# Build pg_tokenizer with mount caches
+################################################################################
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=/tmp/cargo-build-cache \
+    cd /tmp && \
+    git clone --branch ${PG_TOKENIZER_VERSION} --depth 1 https://github.com/tensorchord/pg_tokenizer.rs.git && \
+    cd pg_tokenizer.rs && \
+    CARGO_TARGET_DIR=/tmp/cargo-build-cache/pg_tokenizer cargo pgrx install --pg-config /usr/bin/pg_config --release && \
+    cd / && \
+    rm -rf /tmp/pg_tokenizer.rs
+
+################################################################################
 # Stage 2: Final runtime image (minimal, production-ready)
 ################################################################################
 FROM postgres:18.1-trixie
@@ -117,19 +131,22 @@ ARG PGVECTOR_VERSION=0.8.1
 ARG TIMESCALEDB_VERSION=2.23.1
 ARG VECTORCHORD_VERSION=1.0.0
 ARG VECTORCHORD_BM25_VERSION=0.2.2
+ARG PG_TOKENIZER_VERSION=0.1.1
 
 LABEL org.korrektly.pgvector.version="${PGVECTOR_VERSION}" \
     org.korrektly.timescaledb.version="${TIMESCALEDB_VERSION}" \
     org.korrektly.vectorchord.version="${VECTORCHORD_VERSION}" \
-    org.korrektly.vectorchord-bm25.version="${VECTORCHORD_BM25_VERSION}"
+    org.korrektly.vectorchord-bm25.version="${VECTORCHORD_BM25_VERSION}" \
+    org.korrektly.pg_tokenizer.version="${PG_TOKENIZER_VERSION}"
 
 # Copy only the compiled extensions from builder
 COPY --from=builder /usr/share/postgresql/18/extension/*.control /usr/share/postgresql/18/extension/
 COPY --from=builder /usr/share/postgresql/18/extension/*.sql /usr/share/postgresql/18/extension/
 COPY --from=builder /usr/lib/postgresql/18/lib/*.so /usr/lib/postgresql/18/lib/
 
-# Configure PostgreSQL to preload TimescaleDB and VectorChord
-RUN echo "shared_preload_libraries = 'timescaledb,vchord'" >> /usr/share/postgresql/postgresql.conf.sample
+# Configure PostgreSQL to preload TimescaleDB, VectorChord, and pg_tokenizer
+RUN echo "shared_preload_libraries = 'timescaledb,vchord,pg_tokenizer'" >> /usr/share/postgresql/postgresql.conf.sample && \
+    echo "search_path = '\"\$user\", public, tokenizer_catalog'" >> /usr/share/postgresql/postgresql.conf.sample
 
 # Copy initialization script and set permissions
 COPY --chmod=0755 docker/init-extensions.sh /docker-entrypoint-initdb.d/10-init-extensions.sh

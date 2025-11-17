@@ -1,6 +1,6 @@
 # Korrektly Postgres
 
-A production-ready PostgreSQL 18 Docker image optimized for AI/ML workloads, featuring advanced vector search, full-text search, and time-series capabilities.
+A production-ready PostgreSQL 18 Docker image optimized for AI/ML workloads, featuring advanced vector search, full-text search with tokenization, and time-series capabilities.
 
 [![Docker](https://img.shields.io/badge/docker-ghcr.io-blue)](https://github.com/Korrektly/postgres/pkgs/container/postgres)
 [![PostgreSQL](https://img.shields.io/badge/postgresql-18-blue)](https://www.postgresql.org/)
@@ -16,6 +16,7 @@ This specialized PostgreSQL image includes the following pre-installed extension
 | **TimescaleDB**      | 2.23.1  | Time-series database optimization with compression and continuous aggregates |
 | **VectorChord**      | 1.0.0   | High-performance vector search with HSW (Hierarchical Small World) algorithm |
 | **VectorChord-bm25** | 0.2.2   | Full-text search using BM25 ranking algorithm                                |
+| **pg_tokenizer**     | 0.1.1   | Advanced text tokenization for full-text search using language models        |
 
 ### Use Cases
 
@@ -118,6 +119,7 @@ This approach results in a smaller final image size while maintaining all functi
 The following libraries are preloaded for optimal performance:
 - `timescaledb`
 - `vchord`
+- `pg_tokenizer`
 
 These are configured via `shared_preload_libraries` in PostgreSQL configuration.
 
@@ -195,6 +197,86 @@ You can check container health:
 
 ```bash
 docker inspect --format='{{.State.Health.Status}}' korrektly-postgres
+```
+
+## Configuration
+
+### Required PostgreSQL Settings
+
+This image includes pre-configured settings required for all extensions to function properly. These are automatically applied in the Docker image, but if you're building from source or customizing the configuration, ensure the following settings are present:
+
+#### Preloaded Libraries
+
+```conf
+# Required: Load extensions at PostgreSQL startup
+shared_preload_libraries = 'timescaledb,vchord,pg_tokenizer'
+```
+
+**Why this is required:**
+- `timescaledb` - Must be preloaded to hook into PostgreSQL's query planner and executor
+- `vchord` - Loads vector search indexing mechanisms at startup for optimal performance
+- `pg_tokenizer` - Initializes tokenization models and registers custom functions at startup
+
+#### Search Path Configuration
+
+```conf
+# Required: Include tokenizer_catalog schema in search path
+search_path = '"$user", public, tokenizer_catalog'
+```
+
+**Why this is required:**
+- `tokenizer_catalog` - pg_tokenizer stores its tokenizer configurations and metadata in this schema. Including it in the search path allows you to use pg_tokenizer functions without schema-qualifying them (e.g., `tokenize()` instead of `tokenizer_catalog.tokenize()`).
+
+### Extension-Specific Requirements
+
+#### pg_tokenizer
+
+pg_tokenizer requires both configurations above to function correctly:
+
+1. **Preload requirement**: The extension must be loaded via `shared_preload_libraries` to initialize language models and tokenizer components at database startup.
+
+2. **Schema requirement**: The `tokenizer_catalog` schema must be in the `search_path` to access tokenizer functions and configurations seamlessly.
+
+**Example usage after configuration:**
+
+```sql
+-- Create a custom tokenizer
+SELECT create_tokenizer('my_tokenizer', 'llmlingua2');
+
+-- Tokenize text
+SELECT tokenize('my_tokenizer', 'This is a sample text for tokenization');
+
+-- Use in full-text search
+CREATE TABLE documents (
+    id SERIAL PRIMARY KEY,
+    content TEXT,
+    tokens TSVECTOR
+);
+
+-- Tokenize and store
+INSERT INTO documents (content, tokens)
+VALUES ('Sample document text', to_tsvector(tokenize('my_tokenizer', 'Sample document text')));
+```
+
+### Verifying Configuration
+
+After starting the container, you can verify the configuration:
+
+```bash
+# Connect to the database
+docker exec -it korrektly-postgres psql -U postgres
+
+# Check preloaded libraries
+postgres=# SHOW shared_preload_libraries;
+# Should output: timescaledb,vchord,pg_tokenizer
+
+# Check search path
+postgres=# SHOW search_path;
+# Should output: "$user", public, tokenizer_catalog
+
+# Verify extensions are installed
+postgres=# \dx
+# Should list: vector, timescaledb, vchord, vchord_bm25, pg_tokenizer
 ```
 
 ## Performance Tuning
@@ -283,6 +365,7 @@ This project is licensed under the AGPLv3 License - see the [LICENSE](LICENSE) f
 - [TimescaleDB](https://github.com/timescale/timescaledb) - Time-series database built on PostgreSQL
 - [VectorChord](https://github.com/tensorchord/VectorChord) - High-performance vector search
 - [VectorChord-bm25](https://github.com/tensorchord/VectorChord-bm25) - VectorChord-bm25 for full-text search
+- [pg_tokenizer](https://github.com/tensorchord/pg_tokenizer.rs) - Advanced tokenization for full-text search
 
 ## Support
 
